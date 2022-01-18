@@ -1,0 +1,353 @@
+/**
+  * Bespin: reference implementations of "big data" algorithms
+  *
+  * Licensed under the Apache License, Version 2.0 (the "License");
+  * you may not use this file except in compliance with the License.
+  * You may obtain a copy of the License at
+  *
+  * http://www.apache.org/licenses/LICENSE-2.0
+  *
+  * Unless required by applicable law or agreed to in writing, software
+  * distributed under the License is distributed on an "AS IS" BASIS,
+  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
+
+package ca.uwaterloo.cs451.a5
+
+
+import org.apache.log4j._
+import org.apache.hadoop.fs._
+import org.apache.spark.SparkContext
+import org.apache.spark.SparkConf
+import org.rogach.scallop._
+import org.apache.spark.sql.SparkSession
+
+class Q4Conf(args: Seq[String]) extends ScallopConf(args) {
+  mainOptions = Seq(input, date, text, parquet)
+  val input = opt[String](descr = "input path", required = true)
+  val date = opt[String](descr = "ship date", required = true)
+  val text = opt[Boolean](descr = "plain-text data", required = false, default=Some(false))
+  val parquet = opt[Boolean](descr = "parquet data", required = false, default=Some(false))
+  requireOne(text, parquet)
+  verify()
+}
+
+object Q4 extends {
+  val log = Logger.getLogger(getClass().getName())
+
+  def main(argv: Array[String]) {
+    val args = new Q2Conf(argv)
+
+    log.info("Input: " + args.input())
+    val date=args.date()
+    val conf = new SparkConf().setAppName("Q4")
+    val sc = new SparkContext(conf)
+  if(args.text())
+{
+val our_file=args.input()+"/lineitem.tbl"
+val lineitem = sc.textFile(our_file)
+val customers=sc.textFile(args.input()+"/customer.tbl")
+val orders=sc.textFile(args.input()+"/orders.tbl")
+val nations=sc.textFile(args.input()+"/nation.tbl")
+
+
+/* My version
+val ans=lineitem.filter(p=>{
+val tokens=p.split('|')
+tokens(10).contains(date)
+})
+.map(p=>{
+val tokens=p.split('|')
+(tokens(0),1)
+})
+
+val ord_cust=orders.map(p=>{
+val tokens=p.split('|')
+(tokens(0),tokens(1))
+})
+
+ans.cogroup(ord_cust).take(10).foreach(println)
+
+
+
+val customer=customers.map(p=>{
+val tokens=p.split('|')
+(tokens(0),tokens(3))      // emit customer_key,customer_nation
+})
+
+val joiner_cust_nations=customers.map(p=>{
+val tokens=p.split('|')
+(tokens(3),tokens(0))      // emit customer_nation_key,customer_key
+})
+
+val nation=nations.map(p=>{
+val tokens=p.split('|')
+(tokens(0),tokens(1))     //emit nation_key and nation_name
+})
+
+val cust_nations=joiner_cust_nations.cogroup(nation)
+.filter(p=>{
+p._2._1.iterator.hasNext
+}).map(p=>(p._2._1.iterator.next(),(p._1.iterator.next(),p._2._2.iterator.next())))     //emit-> (customer_key,(nation_key,nation_name))
+
+
+cust_nations.take(10).foreach(println)
+
+
+val line_order=ans.cogroup(ord_cust).filter(p=>{
+p._2._1.iterator.hasNext
+}).map(p=>(p._1,p._2._2.iterator.next()))     //emit customer_key,order_key
+
+
+line_order.take(10).foreach(println)
+
+//lineitem-order-cust-done
+
+cust_nations.cogroup(line_order).take(10).foreach(println)
+
+println("Here")
+
+val all_join=cust_nations.cogroup(line_order)
+.filter(p=>{
+p._2._1.iterator.hasNext
+}).map(p=>(p._2._1.iterator.next()._1.toString.toLong,(p._2._1.iterator.next()._2,1))).sortByKey().map(p=>((p._1,p._2._1),1)).reduceByKey(_+_).groupByKey()
+.map(p=>(p._1._1,p._1._2,p._2.iterator.next()))
+
+all_join.take(200).foreach(println)
+println("Hello")
+
+val joiner1=lineitem.filter(p=>{          //joins lineitem and parts
+val tokens=p.split('|')
+tokens(10).contains(date)
+})
+.map(p=>{
+val tokens=p.split('|')
+(tokens(1),tokens(2))           //emits part_key,supplier_key
+})
+
+
+
+val joiner2=lineitem.filter(p=>{          //joins lineitem and suppliers   //part_key,supplier_key
+val tokens=p.split('|')
+tokens(10).contains(date)
+})
+.map(p=>{
+val tokens=p.split('|')
+(tokens(2),tokens(0))                //if supplier_key and order_id
+}) 
+
+//val order_customer=
+
+//ans.take(10).foreach(println)
+//ans.pprint()
+
+//val ans2=parts.map(p=>{
+//val tokens=p.split('|')
+//(tokens(0),tokens(1))                   //emits part_key,part_name
+//})
+
+//joiner1.filter(p=>p)
+
+//val ans3=suppliers.map(p=>{
+//val tokens=p.split('|')
+//(tokens(0),tokens(1))       //emits supplier_id,supplier_name
+//})
+
+//ans2.take(10).foreach(println)
+
+//joiner1.cogroup(ans2).take(10).foreach(println)
+
+//joiner2.cogroup(ans3).take(10).foreach(println)
+
+//val ans4=joiner1.cogroup(ans2).filter(p=>{
+//p._2._1.iterator.hasNext
+//}).map(p=>(p._2._1.iterator.next(),p._2._2.iterator.next())).collectAsMap()   //(supplier_key,p_name)
+
+//joiner2.cogroup(ans4).map(p=>p._2._1.iterator.next(),p._2._2.iterator.next()).take(10).foreach(println)  // supplier key,order_id
+
+//fix joiner 2 then take for cogrouping
+//val checker=joiner2.cogroup(ans4)     //order_id,p_name
+
+//ans4.cogroup(ans3).take(10).foreach(println)
+//checker.cogroup(ans3).filter(p=>{
+//p._2._1.iterator.hasNext
+//    }).map(p=> (p._2._1.iterator.next(),p._2._2.iterator.next())).take(10).foreach(println)
+
+//val dict=suppliers.map(p=>{
+//val tokens=p.split('|')
+//(tokens(0),tokens(1))
+//}).collectAsMap()   //supplier_id,supplier_name
+
+
+//lineitem.filter(p=>{
+//val tokens=p.split('|')
+//tokens(10).contains(date)
+//})
+//.map(p=>{
+//val tokens=p.split('|')
+//(tokens(0),ans4.get(tokens(2)),dict.get(tokens(2)))
+//}).take(20).foreach(println)
+//val final_ans=
+
+/*
+ans.cogroup(ans2,ans3).filter(p=>{
+p._2._1.iterator.hasNext
+}).map(p=> (p._2._2.iterator.next(),p._1.toLong))
+.take(20).foreach(println)*/
+*/
+
+/*
+
+val line_table=lineitem.filter(p=>{
+  val tokens=p.split('|')
+  tokens(10).contains(date)
+  }).map(p=>{
+  val tokens=p.split('|')
+  (tokens(0),tokens(1))
+  })
+  
+  val order_table=orders.map(p=>{
+  val tokens=p.split('|')
+  (tokens(1),tokens(0))
+  }).collectAsMap()
+  
+  val cust_table=customers.map(p=>{
+  val tokens=p.split('|')
+  (tokens(3),tokens(0))
+  })
+  
+  val nation_table=nations.map(p=>{
+  val tokens=p.split('|')
+  (tokens(0),tokens(1))
+  })
+  
+  val cust_nation_join=cust_table.cogroup(nation_table)
+  cust_nation_join.foreach(println)
+*/
+
+
+
+
+  val line_table=lineitem.filter(p=>{
+  val tokens=p.split('|')
+  tokens(10).contains(date)
+  }).map(p=>{
+  val tokens=p.split('|')
+  (tokens(0),tokens(1))
+  })
+  
+  
+  
+  val order_table=orders.map(p=>{
+  val tokens=p.split('|')
+  (tokens(0),tokens(1))     //order_key,cust_key
+  })
+  
+  val line_order=line_table.cogroup(order_table).filter(p=>{
+  p._2._1.iterator.hasNext
+  }).map(p=>(p._2._2.iterator.next(),1))   // contains only order_cust_key,1
+  
+  val cust_table=customers.map(p=>{
+  val tokens=p.split('|')
+  (tokens(0),tokens(3))
+  })
+  
+  val line_order_customer=line_order.cogroup(cust_table).filter(p=>{
+  p._2._1.iterator.hasNext    // both should be equal so remove empty part
+  }).map(p=>(p._2._2.iterator.next(),1)).reduceByKey(_+_)                //nation_key
+  
+  
+  
+  line_order_customer.take(20).foreach(println)
+
+
+  
+
+  val nation_table=nations.map(p=>{
+  val tokens=p.split('|')
+  (tokens(0),tokens(1))
+  })
+  
+  line_order_customer.cogroup(nation_table).take(20).foreach(println)
+  
+  val line_order_customer_nation=line_order_customer.cogroup(nation_table)
+  .map(p=>((p._1.toString.toLong,(p._2._2.iterator.next(),p._2._1.iterator.next())))).sortByKey()   //.groupByKey().map(p=>(p._1,p._2._1,p._2._2))
+  
+  line_order_customer_nation.foreach(println)
+
+/*
+
+val custkeys = customer
+        .map(line => {
+          val tokens = line.split('|')
+          (tokens(0), tokens(3))
+        })
+        .collectAsMap()
+      val custkeysHMap = sc.broadcast(custkeys)
+
+      val nationkeys = nation
+        .map(line => {
+          val tokens = line.split('|')
+          (tokens(0), tokens(1))
+        })
+        .collectAsMap()
+      val nationkeysHMap = sc.broadcast(nationkeys)
+
+      val l_orderkeys = lineitem
+        .filter(line => {
+          val tokens = line.split('|')
+          tokens(10).contains(date)
+        })
+        .map(line => {
+          val tokens = line.split('|')
+          (tokens(0), 1)
+        })
+        .reduceByKey(_ + _)
+
+      val o_orderkeys = orders
+        .map(line => {
+          val tokens = line.split('|')
+          (tokens(0), tokens(1))
+        })
+
+
+      l_orderkeys.cogroup(o_orderkeys)
+        .filter(p => p._2._1.iterator.hasNext)
+        .map(p => (custkeysHMap.value(p._2._2.iterator.next()), p._2._1.iterator.next()))
+        .reduceByKey(_ + _)
+        .map(p => (p._1.toInt, (nationkeysHMap.value(p._1), p._2)))
+        .sortByKey()
+        .collect()
+        .foreach(p => println("(" + p._1 + "," + p._2._1 + "," + p._2._2 + ")"))
+
+*/
+
+}
+else
+{
+val sparkSession = SparkSession.builder.getOrCreate
+      val lineitemDF = sparkSession.read.parquet(args.input() + "/lineitem")
+      val lineitemRDD = lineitemDF.rdd
+
+      val partsDF = sparkSession.read.parquet(args.input() + "/parts")
+      val partsRDD = partsDF.rdd
+
+
+
+
+     val ans= lineitemRDD
+        .filter(line => line(10).toString.contains(date))
+        .map(line => (line(0), 1))
+
+     val ans2=partsRDD.map(line => (line(0),line(6)))
+
+     ans.cogroup(ans2).filter(p=>{
+p._2._1.iterator.hasNext
+})
+.map(p=> (p._2._2.iterator.next(),p._1))
+.take(20).foreach(println)
+}
+  }
+}
